@@ -1,0 +1,398 @@
+// =============================================================================
+// Influencer Discovery & Deep Analysis Platform - Database Schema
+// ADR-001: PostgreSQL 16 + Prisma 5
+// ADR-002: データ分離原則・スナップショット設計
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// User Management
+// =============================================================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  hashedPassword String
+  name           String
+  role           UserRole  @default(VIEWER)
+  isActive       Boolean   @default(true)
+  lastLoginAt    DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  apiKeys            ApiKey[]
+  savedCandidates    SavedCandidate[]
+  comparisonSessions ComparisonSession[]
+  reports            Report[]
+  auditLogs          AuditLog[]
+  instagramToken     InstagramToken?
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// =============================================================================
+// Instagram Token (AES-256-GCM encrypted at rest)
+// ADR-005: トークンは平文禁止。encryptedToken は token-cipher.ts で暗号化する。
+// ユーザートークン有効期限は 60 日。TOKEN_REFRESH ジョブで定期更新する。
+// =============================================================================
+
+model InstagramToken {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  encryptedToken  String   // AES-256-GCM 暗号化済み。平文ログ出力禁止
+  tokenType       String   @default("USER_LONG_LIVED") // "USER_SHORT_LIVED" | "USER_LONG_LIVED"
+  expiresAt       DateTime
+  instagramUserId String
+  scope           String
+  refreshedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("instagram_tokens")
+}
+
+enum UserRole {
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  hashedKey   String    @unique
+  prefix      String // First 8 chars for identification without exposing full key
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isRevoked   Boolean   @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([hashedKey])
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// =============================================================================
+// Influencer Profile (Identifier & Basic Info)
+// =============================================================================
+
+model InfluencerProfile {
+  id          String   @id @default(cuid())
+  platform    Platform @default(INSTAGRAM)
+  username    String
+  displayName String?
+  profileUrl  String?
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  snapshots      ProfileSnapshot[]
+  scoreRecords   ScoreRecord[]
+  aiAnalyses     AiAnalysis[]
+  savedBy        SavedCandidate[]
+  comparisonItems ComparisonItem[]
+
+  @@unique([platform, username])
+  @@index([platform, username])
+  @@map("influencer_profiles")
+}
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+}
+
+// =============================================================================
+// Profile Snapshot (Fact Data - Append-Only)
+// Instagram API から取得した時点のデータ。UPDATE しない。
+// =============================================================================
+
+model ProfileSnapshot {
+  id              String     @id @default(cuid())
+  profileId       String
+  dataSource      String     @default("instagram_graph_api") // Data provenance
+  fetchedAt       DateTime   @default(now())
+
+  // -- Follower Metrics (fact from API) --
+  followerCount       Int?
+  followerCountStatus DataStatus @default(FACT)
+  followingCount      Int?
+  followingCountStatus DataStatus @default(FACT)
+
+  // -- Content Metrics (fact from API) --
+  mediaCount       Int?
+  mediaCountStatus DataStatus @default(FACT)
+
+  // -- Profile Info (fact from API) --
+  biography     String?
+  biographyStatus DataStatus @default(FACT)
+  profilePictureUrl String?
+  isVerified    Boolean?
+  isPrivate     Boolean?
+  externalUrl   String?
+  category      String?
+
+  // -- Engagement Metrics (calculated/estimated) --
+  engagementRate           Float?
+  engagementRateStatus     DataStatus  @default(ESTIMATED)
+  engagementRateConfidence Confidence?
+  avgLikesPerPost          Float?
+  avgLikesPerPostStatus    DataStatus  @default(ESTIMATED)
+  avgCommentsPerPost       Float?
+  avgCommentsPerPostStatus DataStatus  @default(ESTIMATED)
+
+  // -- Raw API Response (JSONB for future re-parsing) --
+  rawResponse Json?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  profile InfluencerProfile @relation(fields: [profileId], references: [id])
+
+  @@index([profileId, fetchedAt(sort: Desc)])
+  @@index([fetchedAt(sort: Desc)])
+  @@map("profile_snapshots")
+}
+
+enum DataStatus {
+  FACT        // API から取得した確定値
+  ESTIMATED   // 計算・推定で算出した値
+  UNAVAILABLE // 取得不可（非公開アカウント等）
+}
+
+enum Confidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// =============================================================================
+// Score Record (Estimated Data - Append-Only)
+// スコアは UPDATE しない。新しいスコアを INSERT する。
+// =============================================================================
+
+model ScoreRecord {
+  id           String     @id @default(cuid())
+  profileId    String
+  totalScore   Float      // 0-100
+  confidence   Confidence
+  dataType     DataStatus @default(ESTIMATED)
+  scoringModel String     // e.g., "v1.0.0" - scoring model version
+  scoredAt     DateTime   @default(now())
+  deletedAt    DateTime?
+  createdAt    DateTime   @default(now())
+
+  profile    InfluencerProfile @relation(fields: [profileId], references: [id])
+  breakdowns ScoreBreakdown[]
+
+  @@index([profileId, scoredAt(sort: Desc)])
+  @@index([totalScore])
+  @@index([scoredAt(sort: Desc)])
+  @@map("score_records")
+}
+
+// =============================================================================
+// Score Breakdown (Sub-scores)
+// =============================================================================
+
+model ScoreBreakdown {
+  id            String        @id @default(cuid())
+  scoreRecordId String
+  category      ScoreCategory
+  score         Float         // 0-100
+  confidence    Confidence
+  weight        Float         // Weight used in total score calculation
+  rationale     String?       // Human-readable explanation of score
+  dataType      DataStatus    @default(ESTIMATED)
+  createdAt     DateTime      @default(now())
+
+  scoreRecord ScoreRecord @relation(fields: [scoreRecordId], references: [id])
+
+  @@index([scoreRecordId])
+  @@index([category])
+  @@map("score_breakdowns")
+}
+
+enum ScoreCategory {
+  BRAND_FIT        // Brand suitability score
+  RISK             // Risk assessment score
+  PSEUDO_ACTIVITY  // Fake follower / engagement authenticity score
+  ENGAGEMENT       // Engagement quality score
+  GROWTH           // Growth trajectory score
+}
+
+// =============================================================================
+// AI Analysis (LLM-Generated Data - Append-Only)
+// LLM が生成したコメント・分析。常にモデル情報とプロンプトバージョンを記録。
+// =============================================================================
+
+model AiAnalysis {
+  id              String   @id @default(cuid())
+  profileId       String
+  analysisType    AnalysisType
+  content         String   // LLM generated text
+  llmModel        String   // e.g., "claude-sonnet-4-6"
+  promptVersion   String   // e.g., "brand-fit-v1.2"
+  confidence      Confidence
+  dataType        DataStatus @default(ESTIMATED) // Always ESTIMATED for LLM output
+  generatedAt     DateTime @default(now())
+  deletedAt       DateTime?
+  createdAt       DateTime @default(now())
+
+  profile InfluencerProfile @relation(fields: [profileId], references: [id])
+
+  @@index([profileId, analysisType, generatedAt(sort: Desc)])
+  @@index([generatedAt(sort: Desc)])
+  @@map("ai_analyses")
+}
+
+enum AnalysisType {
+  BRAND_FIT_COMMENT     // Brand suitability analysis
+  RISK_COMMENT          // Risk assessment narrative
+  AUDIENCE_INSIGHT      // Audience demographic analysis
+  CONTENT_STYLE         // Content style characterization
+  COLLABORATION_SUGGESTION // Collaboration approach suggestions
+}
+
+// =============================================================================
+// Saved Candidates
+// =============================================================================
+
+model SavedCandidate {
+  id        String    @id @default(cuid())
+  userId    String
+  profileId String
+  note      String?   // User's personal note about this candidate
+  tags      String[]  // User-defined tags for organization
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user    User              @relation(fields: [userId], references: [id])
+  profile InfluencerProfile @relation(fields: [profileId], references: [id])
+
+  @@unique([userId, profileId])
+  @@index([userId])
+  @@map("saved_candidates")
+}
+
+// =============================================================================
+// Comparison Session (max 10 candidates per session)
+// =============================================================================
+
+model ComparisonSession {
+  id        String    @id @default(cuid())
+  userId    String
+  name      String?   // Optional session name
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user  User             @relation(fields: [userId], references: [id])
+  items ComparisonItem[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("comparison_sessions")
+}
+
+model ComparisonItem {
+  id          String   @id @default(cuid())
+  sessionId   String
+  profileId   String
+  displayOrder Int     @default(0)
+  createdAt   DateTime @default(now())
+
+  session ComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  profile InfluencerProfile @relation(fields: [profileId], references: [id])
+
+  @@unique([sessionId, profileId])
+  @@index([sessionId])
+  @@map("comparison_items")
+}
+
+// =============================================================================
+// Report (Generated PDF/CSV)
+// =============================================================================
+
+model Report {
+  id           String       @id @default(cuid())
+  userId       String
+  reportType   ReportType
+  format       ReportFormat
+  title        String
+  status       ReportStatus @default(PENDING)
+  filePath     String?      // Path to generated file (null while PENDING)
+  fileSize     Int?         // File size in bytes
+  metadata     Json?        // Variable structure: filters, parameters used
+  errorMessage String?      // Error details if generation failed
+  generatedAt  DateTime?
+  expiresAt    DateTime?    // Auto-cleanup for generated files
+  deletedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("reports")
+}
+
+enum ReportType {
+  SINGLE_PROFILE  // Single influencer deep analysis
+  COMPARISON      // Multi-influencer comparison
+  BATCH_EXPORT    // Bulk CSV export
+}
+
+enum ReportFormat {
+  PDF
+  CSV
+}
+
+enum ReportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// =============================================================================
+// Audit Log (Immutable - No update, no delete)
+// =============================================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?  // Nullable for system-initiated actions
+  action      String   // e.g., "user.create", "score.generate", "report.export"
+  entity      String   // e.g., "User", "InfluencerProfile", "ScoreRecord"
+  entityId    String?
+  details     Json?    // Action-specific metadata
+  ipAddress   String?
+  performedAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([performedAt(sort: Desc)])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([action])
+  @@map("audit_logs")
+}
