@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
-COPY shared/package.json ./shared/
+COPY shared/ ./shared/
 
 RUN npm ci --workspace=backend
 
@@ -30,7 +30,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
-COPY shared/package.json ./shared/
+COPY shared/ ./shared/
 RUN npm ci --workspace=backend --omit=dev
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
