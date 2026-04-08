@@ -71,7 +71,7 @@ export class InstagramController {
     const authUrl = new URL('https://www.facebook.com/v21.0/dialog/oauth')
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('redirect_uri', redirectUri)
-    authUrl.searchParams.set('scope', 'instagram_basic,pages_show_list,pages_read_engagement,business_management')
+    authUrl.searchParams.set('scope', 'instagram_basic,pages_show_list,pages_read_engagement,business_management,ads_read')
     authUrl.searchParams.set('response_type', 'code')
     authUrl.searchParams.set('state', stateValue)
 
