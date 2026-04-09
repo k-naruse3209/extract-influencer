@@ -132,8 +132,8 @@ export class InstagramFetchProcessor {
       } else {
         throw new Error(
           `Business Discovery API でのデータ取得に失敗しました（対象: @${profile.username}）。` +
-            '開発モードでは、アプリにロールを持つユーザーのアカウントのみ取得可能です。' +
-            '本番環境では instagram_basic の Advanced Access が必要です。',
+            '対象アカウントがビジネス/クリエイターアカウントであること、' +
+            'またはアプリが instagram_business_basic の権限を持つことを確認してください。',
         )
       }
     }

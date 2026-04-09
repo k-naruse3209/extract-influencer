@@ -54,8 +54,9 @@ model InstagramToken {
   encryptedToken  String   // AES-256-GCM 暗号化済み。平文ログ出力禁止
   tokenType       String   @default("USER_LONG_LIVED") // "USER_SHORT_LIVED" | "USER_LONG_LIVED"
   expiresAt       DateTime
-  instagramUserId String
-  scope           String
+  instagramUserId   String
+  instagramUsername String?
+  scope             String
   refreshedAt     DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

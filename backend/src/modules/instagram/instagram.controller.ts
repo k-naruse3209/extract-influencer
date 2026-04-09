@@ -68,10 +68,10 @@ export class InstagramController {
       JSON.stringify({ userId: user.sub, csrf: state ?? crypto.randomUUID() }),
     ).toString('base64url')
 
-    const authUrl = new URL('https://www.facebook.com/v21.0/dialog/oauth')
+    const authUrl = new URL('https://www.instagram.com/oauth/authorize')
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('redirect_uri', redirectUri)
-    authUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,business_management,ads_read')
+    authUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_insights')
     authUrl.searchParams.set('response_type', 'code')
     authUrl.searchParams.set('state', stateValue)
 

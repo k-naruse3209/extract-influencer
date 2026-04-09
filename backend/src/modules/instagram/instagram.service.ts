@@ -59,23 +59,14 @@ export class InstagramService {
    * @param code    Instagram が返却した Authorization Code
    */
   async handleOAuthCallback(userId: string, code: string): Promise<void> {
-    // Facebook Login: code → short-lived token → long-lived token
+    // Instagram Login: code → short-lived token（user_id 含む）→ long-lived token
     const shortLived = await this.apiClient.exchangeShortLivedToken(code)
     const longLived = await this.apiClient.exchangeLongLivedToken(
       shortLived.accessToken,
     )
 
-    // Facebook Pages 経由で紐づいた Instagram Business Account ID を取得
-    const igAccount = await this.apiClient.getInstagramBusinessAccountId(
-      longLived.accessToken,
-    )
-
-    if (!igAccount) {
-      throw new Error(
-        'Instagram Business/Creator アカウントが見つかりません。' +
-          'Facebook ページに Instagram ビジネスアカウントが紐づいているか確認してください。',
-      )
-    }
+    // Instagram Login: /me で IG ユーザー情報を取得（Facebook Pages 不要）
+    const igUser = await this.apiClient.getInstagramMe(longLived.accessToken)
 
     const encryptionKey =
       this.configService.getOrThrow<string>('TOKEN_ENCRYPTION_KEY')
@@ -90,21 +81,23 @@ export class InstagramService {
         encryptedToken,
         tokenType: 'USER_LONG_LIVED',
         expiresAt,
-        instagramUserId: igAccount.igUserId,
-        scope: 'instagram_basic,pages_show_list,pages_read_engagement,business_management',
+        instagramUserId: igUser.id,
+        instagramUsername: igUser.username,
+        scope: 'instagram_business_basic,instagram_business_manage_insights',
         refreshedAt: new Date(),
       },
       update: {
         encryptedToken,
         tokenType: 'USER_LONG_LIVED',
         expiresAt,
-        instagramUserId: igAccount.igUserId,
+        instagramUserId: igUser.id,
+        instagramUsername: igUser.username,
         refreshedAt: new Date(),
       },
     })
 
     this.logger.log(
-      `OAuth token saved for userId=${userId} igUserId=${igAccount.igUserId} igUsername=${igAccount.igUsername}. expiresAt=${expiresAt.toISOString()}`,
+      `OAuth token saved for userId=${userId} igUserId=${igUser.id} igUsername=${igUser.username}. expiresAt=${expiresAt.toISOString()}`,
     )
   }
 
@@ -122,6 +115,7 @@ export class InstagramService {
       where: { userId },
       select: {
         instagramUserId: true,
+        instagramUsername: true,
         refreshedAt: true,
         createdAt: true,
       },
@@ -133,7 +127,7 @@ export class InstagramService {
 
     return {
       connected: true,
-      username: token.instagramUserId ?? undefined,
+      username: token.instagramUsername ?? token.instagramUserId ?? undefined,
       connectedAt: (token.refreshedAt ?? token.createdAt).toISOString(),
     }
   }

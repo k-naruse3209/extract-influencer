@@ -19,10 +19,12 @@ import type {
   InstagramApiMediaInsightsResponse,
 } from './types/instagram-api.types'
 
-const GRAPH_API_BASE = 'https://graph.facebook.com'
+const GRAPH_API_BASE = 'https://graph.instagram.com'
 const GRAPH_API_VERSION = 'v21.0'
-const OAUTH_TOKEN_URL = `${GRAPH_API_BASE}/${GRAPH_API_VERSION}/oauth/access_token`
-const LONG_LIVED_TOKEN_URL = `${GRAPH_API_BASE}/${GRAPH_API_VERSION}/oauth/access_token`
+/** Instagram Login: short-lived token exchange endpoint */
+const OAUTH_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
+/** Instagram Login: long-lived token exchange endpoint */
+const LONG_LIVED_TOKEN_URL = 'https://graph.instagram.com/access_token'
 
 /** IG User node の公式フィールド。account_type は Graph API に存在しない（Basic Display API のみ）。 */
 const PROFILE_FIELDS =
@@ -106,32 +108,18 @@ export class InstagramApiClient {
   }
 
   /**
-   * Facebook Login トークンを使って、ユーザーが管理する Facebook Pages から
-   * 紐づいた Instagram Business Account ID を取得する。
+   * Instagram Login トークンを使って、連携ユーザーの IG ユーザー情報を取得する。
    *
-   * フロー: GET /me/accounts?fields=instagram_business_account{id,username}
+   * フロー: GET /me?fields=id,username,name (graph.instagram.com)
    */
-  async getInstagramBusinessAccountId(
+  async getInstagramMe(
     accessToken: string,
-  ): Promise<{ igUserId: string; igUsername: string } | null> {
-    const url = `${GRAPH_API_BASE}/${GRAPH_API_VERSION}/me/accounts?fields=instagram_business_account{id,username}&access_token=${accessToken}`
-    const raw = await this.get<{
-      data: Array<{
-        instagram_business_account?: { id: string; username: string }
-        id: string
-      }>
-    }>(url)
+  ): Promise<{ id: string; username: string; name?: string }> {
+    const url = new URL(`/${GRAPH_API_VERSION}/me`, GRAPH_API_BASE)
+    url.searchParams.set('fields', 'id,username,name')
+    url.searchParams.set('access_token', accessToken)
 
-    for (const page of raw.data ?? []) {
-      if (page.instagram_business_account) {
-        return {
-          igUserId: page.instagram_business_account.id,
-          igUsername: page.instagram_business_account.username,
-        }
-      }
-    }
-
-    return null
+    return this.get<{ id: string; username: string; name?: string }>(url.toString())
   }
 
   /**
@@ -139,7 +127,7 @@ export class InstagramApiClient {
    * プロフィールを username で取得する。
    *
    * 正しい URL フォーマット:
-   *   GET https://graph.facebook.com/{myIgUserId}
+   *   GET https://graph.instagram.com/{myIgUserId}
    *     ?fields=business_discovery.username({targetUsername}){id,username,...}
    *     &access_token=...
    *
@@ -151,11 +139,11 @@ export class InstagramApiClient {
     myIgUserId: string,
   ): Promise<InstagramProfileData> {
     const discoveryFields = 'id,username,name,biography,followers_count,follows_count,media_count,profile_picture_url,website'
-    // Instagram Login トークンは graph.instagram.com で有効。
-    // graph.facebook.com では "Cannot parse access token" になるため graph.instagram.com を使う。
-    const queryUrl = `${GRAPH_API_BASE}/${GRAPH_API_VERSION}/${myIgUserId}?fields=business_discovery.username(${targetUsername}){${discoveryFields}}&access_token=${accessToken}`
+    const queryUrlObj = new URL(`/${GRAPH_API_VERSION}/${myIgUserId}`, GRAPH_API_BASE)
+    queryUrlObj.searchParams.set('fields', `business_discovery.username(${targetUsername}){${discoveryFields}}`)
+    queryUrlObj.searchParams.set('access_token', accessToken)
 
-    const raw = await this.get<{ business_discovery: InstagramApiProfileResponse }>(queryUrl)
+    const raw = await this.get<{ business_discovery: InstagramApiProfileResponse }>(queryUrlObj.toString())
 
     if (!raw.business_discovery) {
       throw new InstagramApiException(
@@ -243,14 +231,20 @@ export class InstagramApiClient {
   async exchangeShortLivedToken(
     code: string,
   ): Promise<ShortLivedTokenResponse> {
-    // Facebook Login: GET で code をトークンに交換
-    const url = new URL(OAUTH_TOKEN_URL)
-    url.searchParams.set('client_id', this.clientId)
-    url.searchParams.set('client_secret', this.clientSecret)
-    url.searchParams.set('redirect_uri', this.redirectUri)
-    url.searchParams.set('code', code)
+    // Instagram Login: POST form-encoded で code をトークンに交換
+    const body = new URLSearchParams({
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+      redirect_uri: this.redirectUri,
+      code,
+      grant_type: 'authorization_code',
+    })
 
-    const response = await fetch(url.toString(), { method: 'GET' })
+    const response = await fetch(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    })
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -264,10 +258,11 @@ export class InstagramApiClient {
       )
     }
 
-    const raw = (await response.json()) as { access_token: string; token_type: string; expires_in?: number }
+    const raw = (await response.json()) as { access_token: string; token_type: string; user_id: number }
     return {
       accessToken: raw.access_token,
       tokenType: raw.token_type ?? 'bearer',
+      userId: String(raw.user_id),
     }
   }
 
@@ -277,11 +272,11 @@ export class InstagramApiClient {
   async exchangeLongLivedToken(
     shortLivedToken: string,
   ): Promise<LongLivedTokenResponse> {
+    // Instagram Login: ig_exchange_token で長命トークンに交換（graph.instagram.com）
     const url = new URL(LONG_LIVED_TOKEN_URL)
-    url.searchParams.set('grant_type', 'fb_exchange_token')
-    url.searchParams.set('client_id', this.clientId)
+    url.searchParams.set('grant_type', 'ig_exchange_token')
     url.searchParams.set('client_secret', this.clientSecret)
-    url.searchParams.set('fb_exchange_token', shortLivedToken)
+    url.searchParams.set('access_token', shortLivedToken)
 
     const raw = await this.get<InstagramRawLongLivedTokenResponse>(
       url.toString(),

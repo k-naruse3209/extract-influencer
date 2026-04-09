@@ -113,6 +113,8 @@ export interface InstagramApiMediaInsightsResponse {
 export interface ShortLivedTokenResponse {
   accessToken: string
   tokenType: string
+  /** Instagram Login フローで返される IG User ID */
+  userId?: string
 }
 
 /**
