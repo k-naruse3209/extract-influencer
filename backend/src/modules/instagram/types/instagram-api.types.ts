@@ -1,5 +1,5 @@
 /**
- * Instagram Graph API から取得したプロフィールデータの内部表現。
+ * Instagram API から取得したプロフィールデータの内部表現。
  *
  * 取得可能なのは Business / Creator アカウントのみ。
  * PERSONAL アカウントの場合、followerCount 等は null になる（API 制約）。
@@ -26,7 +26,7 @@ export interface InstagramProfileData {
 }
 
 /**
- * Instagram Graph API から取得したメディアインサイトデータの内部表現。
+ * Instagram API から取得したメディアインサイトデータの内部表現。
  * getMediaInsights (single media fields) の既存用途で使用する。
  */
 export interface InstagramMediaData {
@@ -75,7 +75,7 @@ export interface MediaStats {
 }
 
 /**
- * Instagram Graph API の生レスポンス型（メディア一覧）。
+ * Instagram API の生レスポンス型（メディア一覧）。
  */
 export interface InstagramApiMediaListResponse {
   data: Array<{
@@ -94,7 +94,7 @@ export interface InstagramApiMediaListResponse {
 }
 
 /**
- * Instagram Graph API の生レスポンス型（メディア Insights）。
+ * Instagram API の生レスポンス型（メディア Insights）。
  */
 export interface InstagramApiMediaInsightsResponse {
   data: Array<{
@@ -129,8 +129,8 @@ export interface LongLivedTokenResponse {
 }
 
 /**
- * Instagram Graph API の生レスポンス型（プロフィール）。
- * API フィールドは snake_case。内部型への変換は instagram-api.client.ts で行う。
+ * Instagram API の生レスポンス型（プロフィール）。
+ * API フィールドは snake_case。内部型への変換は instagram-official.provider.ts で行う。
  */
 export interface InstagramApiProfileResponse {
   id: string
@@ -146,7 +146,7 @@ export interface InstagramApiProfileResponse {
 }
 
 /**
- * Instagram Graph API の生レスポンス型（メディア）。
+ * Instagram API の生レスポンス型（メディア）。
  */
 export interface InstagramApiMediaResponse {
   id: string
@@ -157,7 +157,7 @@ export interface InstagramApiMediaResponse {
 }
 
 /**
- * Instagram Graph API のエラーレスポンス型。
+ * Instagram API のエラーレスポンス型。
  */
 export interface InstagramApiErrorResponse {
   error: {

@@ -10,14 +10,14 @@ export default function DataDeletionPage() {
     <main className="mx-auto max-w-3xl px-4 py-12">
       <h1 className="mb-8 text-3xl font-bold">Data Deletion Instructions</h1>
       <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        Last updated: March 31, 2026
+        Last updated: April 9, 2026
       </p>
 
       <section className="space-y-6 text-sm leading-relaxed text-gray-700 dark:text-gray-300">
         <div>
           <p>
             This page explains how to request deletion of your data that DXAI Solutions, Inc.
-            has collected through the Influencer Discovery Platform via Facebook Login.
+            has collected through the Influencer Discovery Platform via Instagram Login.
           </p>
         </div>
 
@@ -26,9 +26,9 @@ export default function DataDeletionPage() {
             What Data We Store
           </h2>
           <ul className="ml-4 list-disc space-y-1">
-            <li>Your Facebook access token (encrypted with AES-256-GCM)</li>
-            <li>Your Instagram Business Account ID and username</li>
-            <li>Instagram profile data retrieved via the Instagram Graph API</li>
+            <li>Your Instagram access token (encrypted with AES-256-GCM)</li>
+            <li>Your connected Instagram account ID and username</li>
+            <li>Instagram profile data retrieved via the Instagram API with Instagram Login</li>
           </ul>
         </div>
 
@@ -50,7 +50,7 @@ export default function DataDeletionPage() {
 
         <div>
           <h2 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
-            Option 2: Revoke via Facebook
+            Option 2: Revoke via Meta
           </h2>
           <ol className="ml-4 list-decimal space-y-1">
             <li>
@@ -61,7 +61,7 @@ export default function DataDeletionPage() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Facebook Settings &gt; Apps and Websites
+                Meta Settings &gt; Apps and Websites
               </a>
             </li>
             <li>

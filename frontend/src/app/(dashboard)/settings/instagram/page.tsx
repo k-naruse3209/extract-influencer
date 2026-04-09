@@ -143,6 +143,44 @@ export default function InstagramSettingsPage() {
                 })}
               </p>
             )}
+            <dl className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/30 sm:grid-cols-2">
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">接続方式</dt>
+                <dd className="mt-1 font-medium text-gray-800 dark:text-gray-100">
+                  {status.provider === 'INSTAGRAM_LOGIN' || status.provider === undefined
+                    ? 'Instagram API with Instagram Login'
+                    : status.provider}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">トークン状態</dt>
+                <dd className="mt-1 font-medium text-gray-800 dark:text-gray-100">
+                  {status.tokenStatus ?? 'ACTIVE'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">有効期限</dt>
+                <dd className="mt-1 font-medium text-gray-800 dark:text-gray-100">
+                  {status.expiresAt !== undefined
+                    ? new Date(status.expiresAt).toLocaleString('ja-JP', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : '未設定'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">許可済みスコープ</dt>
+                <dd className="mt-1 font-medium text-gray-800 dark:text-gray-100">
+                  {status.scopes !== undefined && status.scopes.length > 0
+                    ? status.scopes.join(', ')
+                    : '未取得'}
+                </dd>
+              </div>
+            </dl>
             <button
               type="button"
               onClick={() => void handleDisconnect()}
@@ -176,10 +214,13 @@ export default function InstagramSettingsPage() {
         <p className="font-medium text-gray-600 dark:text-gray-300">連携についての注意事項</p>
         <ul className="mt-2 list-disc space-y-1 pl-4">
           <li>
-            連携には Instagram の公式 OAuth 認証を使用します
+            連携には Instagram API with Instagram Login の公式 OAuth 認証を使用します
           </li>
           <li>
-            取得するスコープ: instagram_basic, instagram_content_publish
+            取得するスコープ: instagram_business_basic, instagram_business_manage_insights
+          </li>
+          <li>
+            連携アカウント以外のプロフィールでは、一部メディア指標やインサイトが API の仕様上 `UNAVAILABLE` になります
           </li>
           <li>
             個人アカウントの場合、フォロワー数などの一部データは API の仕様上取得できません

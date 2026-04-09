@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { BullModule } from '@nestjs/bull'
-import { InstagramApiClient } from './instagram-api.client'
+import { InstagramOfficialProvider } from './providers/instagram-official.provider'
+import { InstagramRateLimitService } from './instagram-rate-limit.service'
 import { InstagramService } from './instagram.service'
 import { InstagramController } from './instagram.controller'
 import { InstagramFetchProcessor } from './queues/instagram-fetch.processor'
@@ -21,7 +22,12 @@ import { INSTAGRAM_FETCH_QUEUE } from './queues/instagram-fetch.queue'
       },
     }),
   ],
-  providers: [InstagramApiClient, InstagramService, InstagramFetchProcessor],
+  providers: [
+    InstagramOfficialProvider,
+    InstagramRateLimitService,
+    InstagramService,
+    InstagramFetchProcessor,
+  ],
   controllers: [InstagramController],
   exports: [InstagramService],
 })

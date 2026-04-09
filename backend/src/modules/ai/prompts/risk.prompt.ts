@@ -87,7 +87,7 @@ export function buildRiskPrompt(profile: AnalysisProfileInput): string {
     ? `アカウント種別: ${profile.accountType}`
     : 'アカウント種別: 不明'
 
-  return `【事実データ】（Instagram Graph API より取得）
+  return `【事実データ】（Instagram API with Instagram Login より取得）
 プラットフォーム: ${profile.platform}
 ユーザー名: ${profile.username}
 ${followerInfo}

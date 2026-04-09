@@ -3,9 +3,11 @@
 **プロジェクト**: Influencer Discovery & Deep Analysis Platform  
 **ドキュメント作成日**: 2026-04-09  
 **対象バージョン**: commit `a63e49e`  
-**対象範囲**: Instagram Graph API 統合・OAuth 認証フロー・DB スキーマ
+**対象範囲**: Instagram API with Instagram Login への移行履歴・OAuth 認証フロー・DB スキーマ
 
 ---
+
+> この文書は移行作業の記録です。現行仕様の正本は [ADR-005](../agent-system/adr-005-instagram-api-with-instagram-login.md) と [instagram-source-evaluation](../agent-system/instagram-source-evaluation.md) を参照してください。本文中の `Facebook Login`、`Business Discovery`、`Instagram Graph API` への言及は移行前後の事象説明として残しています。
 
 ## 概要
 

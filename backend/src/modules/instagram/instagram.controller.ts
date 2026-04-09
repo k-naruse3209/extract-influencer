@@ -58,24 +58,10 @@ export class InstagramController {
     @Query('state') state: string | undefined,
     @Res() reply: FastifyReply,
   ): void {
-    const clientId = this.configService.getOrThrow<string>('INSTAGRAM_CLIENT_ID')
-    const redirectUri = this.configService.getOrThrow<string>(
-      'INSTAGRAM_REDIRECT_URI',
+    void reply.redirect(
+      this.instagramService.getAuthorizationUrl(user.sub, state),
+      HttpStatus.FOUND,
     )
-
-    // stateにユーザーIDを含めることでコールバック時にJWT不要で認証できる
-    const stateValue = Buffer.from(
-      JSON.stringify({ userId: user.sub, csrf: state ?? crypto.randomUUID() }),
-    ).toString('base64url')
-
-    const authUrl = new URL('https://www.instagram.com/oauth/authorize')
-    authUrl.searchParams.set('client_id', clientId)
-    authUrl.searchParams.set('redirect_uri', redirectUri)
-    authUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_insights')
-    authUrl.searchParams.set('response_type', 'code')
-    authUrl.searchParams.set('state', stateValue)
-
-    void reply.redirect(authUrl.toString(), HttpStatus.FOUND)
   }
 
   /**
@@ -160,7 +146,15 @@ export class InstagramController {
   @UseGuards(JwtAuthGuard)
   async getConnectionStatus(
     @CurrentUser() user: JwtPayload,
-  ): Promise<{ connected: boolean; username?: string; connectedAt?: string }> {
+  ): Promise<{
+    connected: boolean
+    username?: string
+    connectedAt?: string
+    provider?: string
+    scopes?: string[]
+    expiresAt?: string
+    tokenStatus?: string
+  }> {
     return this.instagramService.getConnectionStatus(user.sub)
   }
 

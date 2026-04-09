@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ConflictException, NotFoundException } from '@nestjs/common'
+import { NotFoundException } from '@nestjs/common'
 import { InfluencerService } from './influencer.service'
 
 // ---------------------------------------------------------------------------
@@ -10,6 +10,7 @@ function buildPrismaMock(overrides: Record<string, unknown> = {}) {
   return {
     influencerProfile: {
       findFirst: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
@@ -82,21 +83,21 @@ describe('InfluencerService', () => {
       expect(result.latestScore).toBeNull()
     })
 
-    it('throws ConflictException when a duplicate profile exists', async () => {
-      prisma.influencerProfile.findFirst.mockResolvedValue(makeProfileRow())
+    it('returns the existing profile when a duplicate profile exists', async () => {
+      const existing = makeProfileRow()
+      prisma.influencerProfile.findFirst.mockResolvedValue(existing)
+      prisma.influencerProfile.findUniqueOrThrow.mockResolvedValue(existing)
 
-      await expect(
-        service.create({ platform: 'INSTAGRAM', username: 'test_user' }),
-      ).rejects.toThrow(ConflictException)
-    })
+      const result = await service.create({
+        platform: 'INSTAGRAM',
+        username: 'test_user',
+      })
 
-    it('includes PROFILE_ALREADY_EXISTS error code in the exception', async () => {
-      prisma.influencerProfile.findFirst.mockResolvedValue(makeProfileRow())
-
-      await expect(
-        service.create({ platform: 'INSTAGRAM', username: 'test_user' }),
-      ).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'PROFILE_ALREADY_EXISTS' }),
+      expect(result.id).toBe('profile-1')
+      expect(prisma.influencerProfile.create).not.toHaveBeenCalled()
+      expect(prisma.influencerProfile.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'profile-1' },
+        include: expect.any(Object),
       })
     })
 

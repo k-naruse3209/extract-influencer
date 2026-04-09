@@ -53,6 +53,10 @@ model InstagramToken {
   userId          String   @unique
   encryptedToken  String   // AES-256-GCM 暗号化済み。平文ログ出力禁止
   tokenType       String   @default("USER_LONG_LIVED") // "USER_SHORT_LIVED" | "USER_LONG_LIVED"
+  providerVariant String   @default("INSTAGRAM_LOGIN")
+  grantedScopes   String?
+  tokenStatus     String   @default("ACTIVE")
+  lastValidatedAt DateTime?
   expiresAt       DateTime
   instagramUserId   String
   instagramUsername String?
@@ -131,6 +135,8 @@ model ProfileSnapshot {
   id              String     @id @default(cuid())
   profileId       String
   dataSource      String     @default("instagram_graph_api") // Data provenance
+  providerVariant String     @default("INSTAGRAM_LOGIN")
+  subjectType     String     @default("TARGET_PROFILE")
   fetchedAt       DateTime   @default(now())
 
   // -- Follower Metrics (fact from API) --

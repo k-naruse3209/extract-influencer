@@ -304,7 +304,7 @@ export class PdfGeneratorService {
       <div style="margin-top:32px;padding:16px;background:#f0f7ff;border-left:4px solid #4a90d9;border-radius:4px;">
         <h4 style="margin:0 0 8px 0;color:#1a1a2e;">データ区分について</h4>
         <ul style="margin:0;padding-left:20px;line-height:2;">
-          <li>${buildStatusBadge('FACT')} <strong>公式データ</strong> — Instagram Graph API より取得した確定値</li>
+          <li>${buildStatusBadge('FACT')} <strong>公式データ</strong> — Instagram API with Instagram Login より取得した確定値</li>
           <li>${buildStatusBadge('ESTIMATED')} <strong>推定値</strong> — 取得データをもとに計算・推定した値。実際の値と差異が生じる場合があります</li>
           <li>${buildStatusBadge('UNAVAILABLE')} <strong>未取得</strong> — 非公開アカウントやAPI制限により取得不可</li>
         </ul>

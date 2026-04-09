@@ -124,6 +124,10 @@ export interface InstagramConnectionStatus {
   connected: boolean
   username?: string
   connectedAt?: string
+  provider?: string
+  scopes?: string[]
+  expiresAt?: string
+  tokenStatus?: string
 }
 
 export interface DashboardRecentSaved {

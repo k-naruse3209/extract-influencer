@@ -37,7 +37,7 @@
 | エージェント | 責務 | 非責務 |
 |------------|------|--------|
 | source-strategist | データソース戦略・優先度・公式/非公式可否 | 実装 |
-| instagram-integration-engineer | Instagram Graph API 実装・OAuth・レート制限管理 | TikTok 連携 |
+| instagram-integration-engineer | Instagram API with Instagram Login 実装・OAuth・レート制限管理 | TikTok 連携 |
 | tiktok-integration-strategist | TikTok データ取得戦略・公式 API 方針・MVP 制約整理 | 実装 |
 | data-governance-analyst | GDPR/個人情報保護法・利用規約コンプライアンス | 実装 |
 

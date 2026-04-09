@@ -2,13 +2,16 @@
 
 | 項目 | 内容 |
 |------|------|
-| ステータス | Accepted |
+| ステータス | Superseded |
 | 決定日 | 2026-03-20 |
+| 更新日 | 2026-04-09 |
 | 決定者 | instagram-integration-engineer |
-| 関連 ADR | ADR-001（技術スタック）、ADR-002（DBスキーマ） |
+| 関連 ADR | ADR-001（技術スタック）、ADR-002（DBスキーマ）、ADR-005（Instagram API with Instagram Login 収束方針） |
 | 関連ドキュメント | docs/agent-system/instagram-source-evaluation.md |
 
 ---
+
+> この ADR は初期の Instagram Graph API 中心設計を記録した履歴ドキュメントです。現行の正本は [ADR-005](./adr-005-instagram-api-with-instagram-login.md) と [instagram-source-evaluation](./instagram-source-evaluation.md) を参照してください。
 
 ## コンテキスト
 

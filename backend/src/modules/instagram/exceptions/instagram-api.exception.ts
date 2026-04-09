@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus } from '@nestjs/common'
 
 /**
- * Instagram Graph API から返却されたエラーを表す例外。
+ * Instagram API から返却されたエラーを表す例外。
  *
  * エラーコードマッピング（主要なもの）:
  *   10  → OAuthException: 非公開アカウントまたは権限不足

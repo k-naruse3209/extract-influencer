@@ -9,6 +9,9 @@ function makeConfigService(overrides: Record<string, string> = {}): ConfigServic
     INSTAGRAM_CLIENT_ID: 'test_client_id',
     INSTAGRAM_CLIENT_SECRET: 'test_client_secret',
     INSTAGRAM_REDIRECT_URI: 'http://localhost:3001/api/v1/auth/instagram/callback',
+    INSTAGRAM_API_VERSION: 'v21.0',
+    INSTAGRAM_OAUTH_SCOPES:
+      'instagram_business_basic,instagram_business_manage_insights',
     ...overrides,
   }
   return {
@@ -16,6 +19,7 @@ function makeConfigService(overrides: Record<string, string> = {}): ConfigServic
       if (key in defaults) return defaults[key]
       throw new Error(`Missing config: ${key}`)
     },
+    get: (key: string, defaultValue?: string) => defaults[key] ?? defaultValue,
   } as unknown as ConfigService
 }
 
@@ -102,7 +106,7 @@ describe('InstagramApiClient', () => {
       const result = await client.getProfile('token')
       expect(result.followersCount).toBeNull()
       expect(result.biography).toBeNull()
-      expect(result.accountType).toBeNull()
+      expect(result.accountType).toBe('BUSINESS')
     })
   })
 
@@ -145,7 +149,7 @@ describe('InstagramApiClient', () => {
         paging: { cursors: { before: 'cursor_a', after: 'cursor_b' } },
       })
 
-      const result = await client.getRecentMedia('test_token')
+      const result = await client.getRecentMedia('test_token', 'ig_user_1')
       expect(result).toHaveLength(2)
       expect(result[0]).toMatchObject({
         id: 'media_1',
@@ -165,7 +169,7 @@ describe('InstagramApiClient', () => {
 
     it('data が空配列のときは空配列を返す', async () => {
       mockFetch(200, { data: [] })
-      const result = await client.getRecentMedia('test_token')
+      const result = await client.getRecentMedia('test_token', 'ig_user_1')
       expect(result).toEqual([])
     })
 
@@ -173,7 +177,7 @@ describe('InstagramApiClient', () => {
       mockFetch(200, {
         data: [{ id: 'media_minimal' }],
       })
-      const result = await client.getRecentMedia('test_token')
+      const result = await client.getRecentMedia('test_token', 'ig_user_1')
       expect(result[0]).toMatchObject({
         id: 'media_minimal',
         timestamp: '',
@@ -197,14 +201,14 @@ describe('InstagramApiClient', () => {
         })
       }))
 
-      await client.getRecentMedia('test_token', 10)
+      await client.getRecentMedia('test_token', 'ig_user_1', 10)
       expect(capturedUrl).toContain('limit=10')
     })
 
     it('HTTP 429 のときは RateLimitException を投げる', async () => {
       mockFetch(429, {})
       let caught: unknown
-      const promise = client.getRecentMedia('token').catch((e) => { caught = e })
+      const promise = client.getRecentMedia('token', 'ig_user_1').catch((e) => { caught = e })
       await vi.runAllTimersAsync()
       await promise
       expect(caught).toBeInstanceOf(RateLimitException)

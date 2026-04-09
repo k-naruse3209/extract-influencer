@@ -10,7 +10,7 @@ export default function PrivacyPolicyPage() {
     <main className="mx-auto max-w-3xl px-4 py-12">
       <h1 className="mb-8 text-3xl font-bold">Privacy Policy</h1>
       <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        Last updated: March 24, 2026
+        Last updated: April 9, 2026
       </p>
 
       <section className="space-y-6 text-sm leading-relaxed text-gray-700 dark:text-gray-300">
@@ -31,40 +31,34 @@ export default function PrivacyPolicyPage() {
             2. Information We Collect
           </h2>
           <h3 className="mb-1 font-medium text-gray-800 dark:text-gray-200">
-            2.1 Information from Facebook and Instagram
+            2.1 Information from Instagram
           </h3>
           <p className="mb-2">
-            When you connect your Facebook account through Facebook Login, we access
+            When you connect your Instagram account through Instagram Login, we access
             the following data with your explicit consent:
           </p>
           <ul className="ml-4 list-disc space-y-1">
             <li>
-              <strong>instagram_basic</strong>: Basic profile information of Instagram
-              Business or Creator accounts linked to your Facebook Pages, including
-              username, biography, follower count, following count, and media count.
+              <strong>instagram_business_basic</strong>: Basic profile information of
+              your connected Instagram Business or Creator account, including username,
+              biography, follower count, following count, media count, and account type.
             </li>
             <li>
-              <strong>pages_show_list</strong>: A list of Facebook Pages you manage,
-              to identify linked Instagram Business accounts.
-            </li>
-            <li>
-              <strong>pages_read_engagement</strong>: Engagement data from your
-              Facebook Pages to support analysis.
-            </li>
-            <li>
-              <strong>business_management</strong>: Access to business assets
-              associated with your account.
+              <strong>instagram_business_manage_insights</strong>: Media insights for
+              your connected account, including reach, impressions, engagement, and saved
+              counts where available.
             </li>
           </ul>
 
           <h3 className="mb-1 mt-4 font-medium text-gray-800 dark:text-gray-200">
-            2.2 Business Discovery Data
+            2.2 Target Profile Discovery Data
           </h3>
           <p>
-            We use the Instagram Business Discovery API to retrieve publicly available
-            profile information of Instagram Business and Creator accounts for analysis
-            purposes. This data includes public profile metrics such as follower count,
-            media count, biography, and recent media engagement.
+            We use official Instagram API target profile discovery endpoints to retrieve
+            supported profile information of Instagram Business and Creator accounts for
+            analysis purposes. When the target profile is not the connected account,
+            unsupported media-level metrics and insights remain unavailable and are not
+            backfilled from another account.
           </p>
 
           <h3 className="mb-1 mt-4 font-medium text-gray-800 dark:text-gray-200">
@@ -94,7 +88,7 @@ export default function PrivacyPolicyPage() {
             4. Data Storage and Security
           </h2>
           <p>
-            We take data security seriously. Access tokens obtained through Facebook
+            We take data security seriously. Access tokens obtained through Instagram
             Login are encrypted using AES-256-GCM before storage. We do not store
             plaintext tokens. All data is transmitted over HTTPS. We implement
             role-based access control (RBAC) to limit data access to authorized
@@ -108,7 +102,7 @@ export default function PrivacyPolicyPage() {
           </h2>
           <p>
             We do not sell, trade, or rent your personal information to third parties.
-            We do not share your Facebook or Instagram data with any third party.
+            We do not share your Instagram account data with any third party.
             Analysis results are only accessible to authenticated users within your
             organization.
           </p>
@@ -137,7 +131,7 @@ export default function PrivacyPolicyPage() {
             <li>Request correction of inaccurate data</li>
             <li>Request deletion of your data</li>
             <li>Withdraw consent for data processing at any time</li>
-            <li>Revoke Facebook/Instagram permissions through your Facebook Settings</li>
+            <li>Revoke Instagram permissions through Meta account settings</li>
           </ul>
         </div>
 

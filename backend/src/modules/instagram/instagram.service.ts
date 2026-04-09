@@ -2,77 +2,79 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectQueue } from '@nestjs/bull'
 import { ConfigService } from '@nestjs/config'
 import type { Queue } from 'bull'
+import type { DataStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
 import { PrismaService } from '../../common/prisma/prisma.service'
-import { InstagramApiClient } from './instagram-api.client'
 import { encryptToken, decryptToken } from '../../common/crypto/token-cipher'
-import { sleep } from '../../common/utils/retry'
+import { InstagramOfficialProvider } from './providers/instagram-official.provider'
+import { InstagramRateLimitService } from './instagram-rate-limit.service'
 import {
   INSTAGRAM_FETCH_QUEUE,
   type InstagramFetchJobData,
 } from './queues/instagram-fetch.queue'
 import type {
-  InstagramProfileData,
   InstagramMediaInsights,
+  InstagramProfileData,
   MediaStats,
 } from './types/instagram-api.types'
+import {
+  INSTAGRAM_PROVIDER_VARIANT,
+  INSTAGRAM_SUBJECT_TYPES,
+  INSTAGRAM_TOKEN_STATUSES,
+  type InstagramProviderVariant,
+  type InstagramSubjectType,
+  type InstagramTokenStatus,
+} from './instagram.constants'
 import { InstagramApiException } from './exceptions/instagram-api.exception'
-import type { DataStatus } from '@prisma/client'
 
-/** メディアインサイト取得時に各リクエスト間に挟む最小ウェイト（ms）。
- *  Instagram Graph API は 200 calls/hour/user token。
- *  25 件のメディアで 25 回 API を叩くため、間引きで制限を回避する。 */
-const MEDIA_INSIGHTS_REQUEST_INTERVAL_MS = 200
+type SnapshotMetadata = {
+  providerVariant: InstagramProviderVariant
+  subjectType: InstagramSubjectType
+  providerPayload: unknown
+}
 
-/**
- * Instagram 連携のユースケース層。
- *
- * 責務:
- * - OAuth コールバック処理（コード → トークン交換 → DB 保存）
- * - プロフィールデータ取得ジョブのエンキュー
- * - ProfileSnapshot の DB 保存
- *
- * セキュリティ:
- * - アクセストークンは AES-256-GCM 暗号化後に DB 保存。平文を保持しない。
- * - 復号したトークンはローカル変数のみで扱い、ログに出力しない。
- */
+type ConnectionStatusResponse = {
+  connected: boolean
+  username?: string
+  connectedAt?: string
+  provider?: string
+  scopes?: string[]
+  expiresAt?: string
+  tokenStatus?: string
+}
+
 @Injectable()
 export class InstagramService {
   private readonly logger = new Logger(InstagramService.name)
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly apiClient: InstagramApiClient,
+    private readonly provider: InstagramOfficialProvider,
     private readonly configService: ConfigService,
+    private readonly rateLimitService: InstagramRateLimitService,
     @InjectQueue(INSTAGRAM_FETCH_QUEUE)
     private readonly fetchQueue: Queue<InstagramFetchJobData>,
   ) {}
 
-  /**
-   * Instagram OAuth コールバックを処理する。
-   *
-   * フロー:
-   * 1. Authorization Code → 短命トークンに交換
-   * 2. 短命トークン → 長命トークン（60 日）に交換
-   * 3. InstagramToken を DB に upsert（AES-256-GCM 暗号化済み）
-   *
-   * @param userId  認証済みアプリユーザーの ID
-   * @param code    Instagram が返却した Authorization Code
-   */
-  async handleOAuthCallback(userId: string, code: string): Promise<void> {
-    // Instagram Login: code → short-lived token（user_id 含む）→ long-lived token
-    const shortLived = await this.apiClient.exchangeShortLivedToken(code)
-    const longLived = await this.apiClient.exchangeLongLivedToken(
-      shortLived.accessToken,
+  getAuthorizationUrl(userId: string, csrf?: string): string {
+    return this.provider.buildAuthorizationUrl(
+      userId,
+      csrf ?? randomUUID(),
     )
+  }
 
-    // Instagram Login: /me で IG ユーザー情報を取得（Facebook Pages 不要）
-    const igUser = await this.apiClient.getInstagramMe(longLived.accessToken)
+  async handleOAuthCallback(userId: string, code: string): Promise<void> {
+    const tokenExchange = await this.provider.exchangeCode(code)
+    const connectedAccount = await this.provider.getConnectedAccount(
+      tokenExchange.accessToken,
+    )
 
     const encryptionKey =
       this.configService.getOrThrow<string>('TOKEN_ENCRYPTION_KEY')
-    const encryptedToken = encryptToken(longLived.accessToken, encryptionKey)
-
-    const expiresAt = new Date(Date.now() + longLived.expiresIn * 1000)
+    const encryptedToken = encryptToken(tokenExchange.accessToken, encryptionKey)
+    const expiresAt = new Date(Date.now() + tokenExchange.expiresIn * 1000)
+    const grantedScopes = tokenExchange.grantedScopes.join(',')
 
     await this.prisma.instagramToken.upsert({
       where: { userId },
@@ -80,37 +82,37 @@ export class InstagramService {
         userId,
         encryptedToken,
         tokenType: 'USER_LONG_LIVED',
+        providerVariant: INSTAGRAM_PROVIDER_VARIANT,
+        grantedScopes,
+        tokenStatus: INSTAGRAM_TOKEN_STATUSES.ACTIVE,
+        lastValidatedAt: new Date(),
         expiresAt,
-        instagramUserId: igUser.id,
-        instagramUsername: igUser.username,
-        scope: 'instagram_business_basic,instagram_business_manage_insights',
+        instagramUserId: connectedAccount.id,
+        instagramUsername: connectedAccount.username,
+        scope: grantedScopes,
         refreshedAt: new Date(),
       },
       update: {
         encryptedToken,
         tokenType: 'USER_LONG_LIVED',
+        providerVariant: INSTAGRAM_PROVIDER_VARIANT,
+        grantedScopes,
+        tokenStatus: INSTAGRAM_TOKEN_STATUSES.ACTIVE,
+        lastValidatedAt: new Date(),
         expiresAt,
-        instagramUserId: igUser.id,
-        instagramUsername: igUser.username,
+        instagramUserId: connectedAccount.id,
+        instagramUsername: connectedAccount.username,
+        scope: grantedScopes,
         refreshedAt: new Date(),
       },
     })
 
     this.logger.log(
-      `OAuth token saved for userId=${userId} igUserId=${igUser.id} igUsername=${igUser.username}. expiresAt=${expiresAt.toISOString()}`,
+      `OAuth token saved for userId=${userId} igUserId=${connectedAccount.id} igUsername=${connectedAccount.username}. expiresAt=${expiresAt.toISOString()}`,
     )
   }
 
-  /**
-   * 指定ユーザーの Instagram 連携状態を返す。
-   *
-   * @param userId  アプリユーザーの ID
-   */
-  async getConnectionStatus(userId: string): Promise<{
-    connected: boolean
-    username?: string
-    connectedAt?: string
-  }> {
+  async getConnectionStatus(userId: string): Promise<ConnectionStatusResponse> {
     const token = await this.prisma.instagramToken.findUnique({
       where: { userId },
       select: {
@@ -118,6 +120,10 @@ export class InstagramService {
         instagramUsername: true,
         refreshedAt: true,
         createdAt: true,
+        providerVariant: true,
+        grantedScopes: true,
+        expiresAt: true,
+        tokenStatus: true,
       },
     })
 
@@ -125,18 +131,19 @@ export class InstagramService {
       return { connected: false }
     }
 
+    const tokenStatus = deriveTokenStatus(token.expiresAt, token.tokenStatus)
+
     return {
       connected: true,
       username: token.instagramUsername ?? token.instagramUserId ?? undefined,
       connectedAt: (token.refreshedAt ?? token.createdAt).toISOString(),
+      provider: token.providerVariant ?? INSTAGRAM_PROVIDER_VARIANT,
+      scopes: splitScopes(token.grantedScopes),
+      expiresAt: token.expiresAt.toISOString(),
+      tokenStatus,
     }
   }
 
-  /**
-   * 指定ユーザーの Instagram トークンを削除して連携解除する。
-   *
-   * @param userId  アプリユーザーの ID
-   */
   async disconnect(userId: string): Promise<void> {
     await this.prisma.instagramToken.deleteMany({
       where: { userId },
@@ -145,20 +152,25 @@ export class InstagramService {
     this.logger.log(`Instagram token deleted: userId=${userId}`)
   }
 
-  /**
-   * プロフィールデータ取得をキューに追加する（手動リクエスト）。
-   *
-   * @param profileId  InfluencerProfile の ID
-   * @param userId     リクエストを送ったユーザーの ID（トークン取得に使用）
-   */
   async enqueueProfileFetch(
     profileId: string,
-    userId: string,
+    requestedByUserId: string,
   ): Promise<void> {
+    const profile = await this.prisma.influencerProfile.findUnique({
+      where: { id: profileId },
+      select: { id: true, username: true },
+    })
+
+    if (!profile) {
+      throw new Error(`InfluencerProfile not found: ${profileId}`)
+    }
+
     const jobData: InstagramFetchJobData = {
       type: 'PROFILE',
       profileId,
-      userId,
+      requestedByUserId,
+      targetUsername: profile.username,
+      providerVariant: INSTAGRAM_PROVIDER_VARIANT,
       priority: 1,
     }
 
@@ -174,22 +186,73 @@ export class InstagramService {
     })
 
     this.logger.log(
-      `PROFILE job enqueued: profileId=${profileId} userId=${userId}`,
+      `PROFILE job enqueued: profileId=${profileId} requestedByUserId=${requestedByUserId}`,
     )
   }
 
-  /**
-   * Instagram API から取得したプロフィールデータを ProfileSnapshot として保存する。
-   *
-   * PERSONAL アカウントの followerCount 等は DataStatus.UNAVAILABLE として保存する。
-   * これは Instagram Graph API の仕様による制約であり、推定で補完しない。
-   *
-   * @param profileId  InfluencerProfile の ID
-   * @param data       InstagramApiClient から取得したプロフィールデータ
-   */
+  async processProfileFetch(
+    profileId: string,
+    requestedByUserId: string,
+    targetUsername: string,
+    providerVariant: InstagramProviderVariant,
+  ): Promise<void> {
+    const accessToken = await this.resolveAccessToken(requestedByUserId)
+
+    await this.rateLimitService.waitForRequestWindow(
+      providerVariant,
+      requestedByUserId,
+    )
+    const connectedAccount = await this.provider.getConnectedAccount(accessToken)
+
+    await this.rateLimitService.waitForRequestWindow(
+      providerVariant,
+      requestedByUserId,
+    )
+    const profileData = await this.provider.fetchTargetProfile(
+      targetUsername,
+      connectedAccount.id,
+      accessToken,
+    )
+
+    const subjectType: InstagramSubjectType =
+      profileData.id === connectedAccount.id
+        ? INSTAGRAM_SUBJECT_TYPES.CONNECTED_ACCOUNT
+        : INSTAGRAM_SUBJECT_TYPES.TARGET_PROFILE
+
+    await this.saveSnapshot(profileId, profileData, {
+      providerVariant,
+      subjectType,
+      providerPayload: profileData,
+    })
+
+    if (profileData.name) {
+      await this.prisma.influencerProfile.update({
+        where: { id: profileId },
+        data: { displayName: profileData.name },
+      })
+    }
+
+    await this.enqueueMediaInsightsFetch(
+      profileId,
+      requestedByUserId,
+      profileData.id,
+      subjectType,
+      providerVariant,
+    )
+
+    this.logger.log(
+      `ProfileSnapshot saved: profileId=${profileId} username=${targetUsername} subjectType=${subjectType}`,
+    )
+  }
+
   async saveSnapshot(
     profileId: string,
     data: InstagramProfileData,
+    metadata: SnapshotMetadata = {
+      providerVariant: INSTAGRAM_PROVIDER_VARIANT,
+      subjectType: INSTAGRAM_SUBJECT_TYPES.TARGET_PROFILE,
+      providerPayload: data,
+    },
   ): Promise<void> {
     const isPersonalAccount = data.accountType === 'PERSONAL'
     const unavailable: DataStatus = 'UNAVAILABLE'
@@ -199,6 +262,8 @@ export class InstagramService {
       data: {
         profileId,
         dataSource: 'instagram_graph_api',
+        providerVariant: metadata.providerVariant,
+        subjectType: metadata.subjectType,
         followerCount: isPersonalAccount ? null : data.followersCount,
         followerCountStatus: isPersonalAccount ? unavailable : fact,
         followingCount: isPersonalAccount ? null : data.followsCount,
@@ -208,29 +273,34 @@ export class InstagramService {
         biography: data.biography,
         profilePictureUrl: data.profilePictureUrl,
         externalUrl: data.website,
-        rawResponse: JSON.parse(JSON.stringify(data)),
+        rawResponse: {
+          providerVariant: metadata.providerVariant,
+          subjectType: metadata.subjectType,
+          providerPayload: toJsonValue(metadata.providerPayload),
+          normalizedPayload: toJsonValue(data),
+        },
       },
     })
 
     this.logger.log(
-      `Snapshot saved: profileId=${profileId} accountType=${data.accountType}`,
+      `Snapshot saved: profileId=${profileId} accountType=${data.accountType} subjectType=${metadata.subjectType}`,
     )
   }
 
-  /**
-   * メディアインサイト取得ジョブをキューに追加する。
-   *
-   * @param profileId  InfluencerProfile の ID
-   * @param userId     Instagram トークンを保持しているユーザーの ID
-   */
   async enqueueMediaInsightsFetch(
     profileId: string,
-    userId: string,
+    requestedByUserId: string,
+    targetAccountId: string,
+    subjectType: InstagramSubjectType,
+    providerVariant: InstagramProviderVariant = INSTAGRAM_PROVIDER_VARIANT,
   ): Promise<void> {
     const jobData: InstagramFetchJobData = {
       type: 'MEDIA_INSIGHTS',
       profileId,
-      userId,
+      requestedByUserId,
+      targetAccountId,
+      subjectType,
+      providerVariant,
       priority: 5,
     }
 
@@ -239,71 +309,62 @@ export class InstagramService {
       attempts: 3,
       backoff: {
         type: 'exponential',
-        delay: 10000,
+        delay: 10_000,
       },
       removeOnComplete: true,
       removeOnFail: false,
     })
 
     this.logger.log(
-      `MEDIA_INSIGHTS job enqueued: profileId=${profileId} userId=${userId}`,
+      `MEDIA_INSIGHTS job enqueued: profileId=${profileId} subjectType=${subjectType} targetAccountId=${targetAccountId}`,
     )
   }
 
-  /**
-   * 最近のメディアとインサイトを取得し、ProfileSnapshot に集計値として保存する。
-   *
-   * フロー:
-   * 1. userId から暗号化トークンを取得・復号する
-   * 2. getRecentMedia() で最近 25 件を取得する
-   * 3. 各メディアに対して getMediaInsightsForMedia() を呼び出す（Business/Creator のみ）
-   *    - PERSONAL アカウント（error code 10, httpStatus 403）はインサイトを UNAVAILABLE として扱う
-   *    - インサイト取得間に MEDIA_INSIGHTS_REQUEST_INTERVAL_MS のウェイトを入れる
-   * 4. 集計データ（avgLikes, avgComments, avgReach, engagementRate）を算出し、
-   *    既存の最新 ProfileSnapshot を更新する（存在しなければ新規作成する）
-   *
-   * @param profileId  InfluencerProfile の ID
-   * @param userId     Instagram トークンを保持しているユーザーの ID
-   */
   async fetchAndSaveMediaInsights(
     profileId: string,
-    userId: string,
+    requestedByUserId: string,
+    targetAccountId: string,
+    subjectType: InstagramSubjectType,
+    providerVariant: InstagramProviderVariant,
   ): Promise<void> {
-    const accessToken = await this.resolveAccessToken(userId)
-
-    // Instagram Business Account ID を取得
-    const tokenRecord = await this.prisma.instagramToken.findUnique({
-      where: { userId },
-      select: { instagramUserId: true },
-    })
-    if (!tokenRecord?.instagramUserId) {
-      throw new Error(
-        `Instagram Business Account ID not found for userId=${userId}. Re-authentication required.`,
+    if (subjectType !== INSTAGRAM_SUBJECT_TYPES.CONNECTED_ACCOUNT) {
+      await this.saveUnavailableMediaStatsToSnapshot(
+        profileId,
+        providerVariant,
+        subjectType,
+        'requires_account_owner_consent',
       )
+      return
     }
 
-    const mediaList = await this.apiClient.getRecentMedia(accessToken, tokenRecord.instagramUserId, 25)
+    const accessToken = await this.resolveAccessToken(requestedByUserId)
+
+    await this.rateLimitService.waitForRequestWindow(
+      providerVariant,
+      requestedByUserId,
+    )
+    const mediaList = await this.provider.fetchTargetMedia(
+      targetAccountId,
+      accessToken,
+      25,
+    )
 
     if (mediaList.length === 0) {
       this.logger.log(
-        `No recent media found: profileId=${profileId} userId=${userId}`,
+        `No recent media found: profileId=${profileId} requestedByUserId=${requestedByUserId}`,
       )
       return
     }
 
     const insightResults: InstagramMediaInsights[] = []
-    let isPersonalAccount = false
-
-    for (let i = 0; i < mediaList.length; i++) {
-      const media = mediaList[i]
-
-      // リクエスト間のウェイト（最初の1件を除く）
-      if (i > 0) {
-        await sleep(MEDIA_INSIGHTS_REQUEST_INTERVAL_MS)
-      }
+    for (const media of mediaList) {
+      await this.rateLimitService.waitForRequestWindow(
+        providerVariant,
+        requestedByUserId,
+      )
 
       try {
-        const insights = await this.apiClient.getMediaInsightsForMedia(
+        const insights = await this.provider.fetchMediaInsights(
           media.id,
           accessToken,
         )
@@ -313,46 +374,87 @@ export class InstagramService {
           error instanceof InstagramApiException &&
           error.getStatus() === 403
         ) {
-          // PERSONAL アカウントはインサイト取得不可（code 10）
-          isPersonalAccount = true
-          this.logger.log(
-            `Media insights unavailable (PERSONAL account): profileId=${profileId} mediaId=${media.id}`,
+          await this.saveUnavailableMediaStatsToSnapshot(
+            profileId,
+            providerVariant,
+            subjectType,
+            'insights_not_available_for_account',
           )
-          // PERSONAL アカウントと判定したら残りのメディアもスキップする
-          break
+          return
         }
-        // その他のエラーは個別メディアをスキップしてログに残す
+
         this.logger.warn(
           `Failed to fetch insights for mediaId=${media.id} profileId=${profileId}: ${String(error)}`,
         )
       }
     }
 
-    const stats = this.aggregateMediaStats(
-      mediaList,
-      insightResults,
-      isPersonalAccount,
-    )
-
-    await this.saveMediaStatsToSnapshot(profileId, stats)
+    const stats = this.aggregateMediaStats(mediaList, insightResults)
+    await this.saveMediaStatsToSnapshot(profileId, stats, {
+      providerVariant,
+      subjectType,
+      providerPayload: {
+        mediaList,
+        insightResults,
+      },
+    })
 
     this.logger.log(
       `MediaInsights saved: profileId=${profileId} postCount=${stats.postCount}`,
     )
   }
 
-  /**
-   * 最新の ProfileSnapshot の followerCount を使ってエンゲージメント率を計算し、
-   * 集計データを既存スナップショットに書き込む（なければ新規作成）。
-   *
-   * ProfileSnapshot は append-only 設計だが、メディア統計は PROFILE ジョブと
-   * 独立して取得されるため、既存の最新スナップショットを UPDATE して補完する。
-   * これは snapshot の「その時点のデータ」をできるだけ充実させるための例外的な UPDATE 操作であり、
-   * スコアリングに渡すデータの精度向上が目的である。
-   */
+  async refreshLongLivedToken(
+    userId: string,
+    providerVariant: InstagramProviderVariant,
+  ): Promise<void> {
+    const tokenRecord = await this.prisma.instagramToken.findUnique({
+      where: { userId },
+    })
+
+    if (!tokenRecord) {
+      this.logger.warn(`TOKEN_REFRESH: no token found for userId=${userId}`)
+      return
+    }
+
+    const encryptionKey =
+      this.configService.getOrThrow<string>('TOKEN_ENCRYPTION_KEY')
+    const currentToken = decryptToken(tokenRecord.encryptedToken, encryptionKey)
+
+    try {
+      await this.rateLimitService.waitForRequestWindow(providerVariant, userId)
+      const refreshed = await this.provider.refreshToken(currentToken)
+      const newEncryptedToken = encryptToken(refreshed.accessToken, encryptionKey)
+      const expiresAt = new Date(Date.now() + refreshed.expiresIn * 1000)
+
+      await this.prisma.instagramToken.update({
+        where: { userId },
+        data: {
+          encryptedToken: newEncryptedToken,
+          tokenType: 'USER_LONG_LIVED',
+          providerVariant,
+          grantedScopes: refreshed.grantedScopes.join(','),
+          tokenStatus: INSTAGRAM_TOKEN_STATUSES.ACTIVE,
+          lastValidatedAt: new Date(),
+          expiresAt,
+          refreshedAt: new Date(),
+        },
+      })
+    } catch (error) {
+      await this.prisma.instagramToken.update({
+        where: { userId },
+        data: {
+          tokenStatus: INSTAGRAM_TOKEN_STATUSES.REAUTH_REQUIRED,
+        },
+      })
+      throw error
+    }
+  }
+
   private async saveMediaStatsToSnapshot(
     profileId: string,
     stats: MediaStats,
+    metadata: SnapshotMetadata,
   ): Promise<void> {
     const latest = await this.prisma.profileSnapshot.findFirst({
       where: { profileId, deletedAt: null },
@@ -369,90 +471,140 @@ export class InstagramService {
     const estimatedStatus: DataStatus = 'ESTIMATED'
     const unavailableStatus: DataStatus = 'UNAVAILABLE'
 
+    const data = {
+      avgLikesPerPost: stats.avgLikes,
+      avgLikesPerPostStatus:
+        stats.avgLikes !== null ? estimatedStatus : unavailableStatus,
+      avgCommentsPerPost: stats.avgComments,
+      avgCommentsPerPostStatus:
+        stats.avgComments !== null ? estimatedStatus : unavailableStatus,
+      engagementRate,
+      engagementRateStatus:
+        engagementRate !== null ? estimatedStatus : unavailableStatus,
+      engagementRateConfidence: engagementRate !== null ? ('HIGH' as const) : null,
+      providerVariant: metadata.providerVariant,
+      subjectType: metadata.subjectType,
+      rawResponse: {
+        providerVariant: metadata.providerVariant,
+        subjectType: metadata.subjectType,
+        providerPayload: toJsonValue(metadata.providerPayload),
+        normalizedPayload: toJsonValue({
+          ...stats,
+          engagementRate,
+        }),
+      },
+    }
+
     if (latest !== null) {
       await this.prisma.profileSnapshot.update({
         where: { id: latest.id },
-        data: {
-          avgLikesPerPost: stats.avgLikes,
-          avgLikesPerPostStatus: stats.avgLikes !== null ? estimatedStatus : unavailableStatus,
-          avgCommentsPerPost: stats.avgComments,
-          avgCommentsPerPostStatus: stats.avgComments !== null ? estimatedStatus : unavailableStatus,
-          engagementRate: engagementRate,
-          engagementRateStatus: engagementRate !== null ? estimatedStatus : unavailableStatus,
-          engagementRateConfidence: engagementRate !== null ? 'HIGH' : null,
-        },
+        data,
       })
-    } else {
-      // スナップショット未作成の場合は最低限のレコードを新規作成する
-      await this.prisma.profileSnapshot.create({
-        data: {
-          profileId,
-          dataSource: 'instagram_graph_api',
-          avgLikesPerPost: stats.avgLikes,
-          avgLikesPerPostStatus: stats.avgLikes !== null ? estimatedStatus : unavailableStatus,
-          avgCommentsPerPost: stats.avgComments,
-          avgCommentsPerPostStatus: stats.avgComments !== null ? estimatedStatus : unavailableStatus,
-          engagementRate: engagementRate,
-          engagementRateStatus: engagementRate !== null ? estimatedStatus : unavailableStatus,
-          engagementRateConfidence: engagementRate !== null ? 'HIGH' : null,
-          rawResponse: JSON.parse(JSON.stringify({ mediaStats: stats })),
-        },
-      })
+      return
     }
+
+    await this.prisma.profileSnapshot.create({
+      data: {
+        profileId,
+        dataSource: 'instagram_graph_api',
+        ...data,
+      },
+    })
   }
 
-  /**
-   * メディア一覧とインサイト結果から集計統計を計算する。
-   *
-   * インサイトが取得できなかった（PERSONAL アカウント等）場合、
-   * avgReach は null として返す（欠損値の推定補完禁止）。
-   */
+  private async saveUnavailableMediaStatsToSnapshot(
+    profileId: string,
+    providerVariant: InstagramProviderVariant,
+    subjectType: InstagramSubjectType,
+    reason: string,
+  ): Promise<void> {
+    const unavailableStatus: DataStatus = 'UNAVAILABLE'
+
+    const latest = await this.prisma.profileSnapshot.findFirst({
+      where: { profileId, deletedAt: null },
+      orderBy: { fetchedAt: 'desc' },
+      select: { id: true },
+    })
+
+    const data = {
+      avgLikesPerPost: null,
+      avgLikesPerPostStatus: unavailableStatus,
+      avgCommentsPerPost: null,
+      avgCommentsPerPostStatus: unavailableStatus,
+      engagementRate: null,
+      engagementRateStatus: unavailableStatus,
+      engagementRateConfidence: null,
+      providerVariant,
+      subjectType,
+      rawResponse: {
+        providerVariant,
+        subjectType,
+        providerPayload: { reason },
+        normalizedPayload: {
+          reason,
+        },
+      },
+    }
+
+    if (latest) {
+      await this.prisma.profileSnapshot.update({
+        where: { id: latest.id },
+        data,
+      })
+      return
+    }
+
+    await this.prisma.profileSnapshot.create({
+      data: {
+        profileId,
+        dataSource: 'instagram_graph_api',
+        ...data,
+      },
+    })
+  }
+
   private aggregateMediaStats(
     mediaList: { likeCount: number | null; commentsCount: number | null }[],
     insightResults: InstagramMediaInsights[],
-    isPersonalAccount: boolean,
   ): MediaStats {
     const postCount = mediaList.length
 
     const totalLikes = mediaList.reduce(
-      (sum, m) => (m.likeCount !== null ? sum + m.likeCount : sum),
+      (sum, media) => (media.likeCount !== null ? sum + media.likeCount : sum),
       0,
     )
-    const likesAvailable = mediaList.filter((m) => m.likeCount !== null).length
+    const likesAvailable = mediaList.filter(
+      (media) => media.likeCount !== null,
+    ).length
     const avgLikes = likesAvailable > 0 ? totalLikes / likesAvailable : null
 
     const totalComments = mediaList.reduce(
-      (sum, m) => (m.commentsCount !== null ? sum + m.commentsCount : sum),
+      (sum, media) =>
+        media.commentsCount !== null ? sum + media.commentsCount : sum,
       0,
     )
     const commentsAvailable = mediaList.filter(
-      (m) => m.commentsCount !== null,
+      (media) => media.commentsCount !== null,
     ).length
     const avgComments =
       commentsAvailable > 0 ? totalComments / commentsAvailable : null
 
-    let avgReach: number | null = null
-    if (!isPersonalAccount && insightResults.length > 0) {
-      const reachValues = insightResults
-        .map((i) => i.reach)
-        .filter((r): r is number => r !== null)
-      avgReach = reachValues.length > 0
-        ? reachValues.reduce((a, b) => a + b, 0) / reachValues.length
-        : null
-    }
+    const reachValues = insightResults
+      .map((insight) => insight.reach)
+      .filter((reach): reach is number => reach !== null)
 
     return {
       avgLikes,
       avgComments,
-      avgReach,
+      avgReach:
+        reachValues.length > 0
+          ? reachValues.reduce((total, reach) => total + reach, 0) /
+            reachValues.length
+          : null,
       postCount,
-      engagementRate: null, // followerCount が必要なため saveMediaStatsToSnapshot で計算する
+      engagementRate: null,
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
 
   private async resolveAccessToken(userId: string): Promise<string> {
     const tokenRecord = await this.prisma.instagramToken.findUnique({
@@ -466,6 +618,12 @@ export class InstagramService {
     }
 
     if (tokenRecord.expiresAt < new Date()) {
+      await this.prisma.instagramToken.update({
+        where: { userId },
+        data: {
+          tokenStatus: INSTAGRAM_TOKEN_STATUSES.REAUTH_REQUIRED,
+        },
+      })
       throw new Error(
         `Instagram token expired for userId=${userId}. TOKEN_REFRESH job required.`,
       )
@@ -478,10 +636,40 @@ export class InstagramService {
   }
 }
 
-/**
- * エンゲージメント率を計算する純粋関数。
- * 分母（followerCount）が 0 以下または null の場合は null を返す。
- */
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue
+}
+
+function splitScopes(value: string | null | undefined): string[] | undefined {
+  if (!value) return undefined
+
+  const scopes = value
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+
+  return scopes.length > 0 ? scopes : undefined
+}
+
+function deriveTokenStatus(
+  expiresAt: Date,
+  storedStatus: string | null | undefined,
+): InstagramTokenStatus {
+  if (expiresAt < new Date()) {
+    return INSTAGRAM_TOKEN_STATUSES.REAUTH_REQUIRED
+  }
+
+  if (
+    storedStatus === INSTAGRAM_TOKEN_STATUSES.ACTIVE ||
+    storedStatus === INSTAGRAM_TOKEN_STATUSES.REAUTH_REQUIRED ||
+    storedStatus === INSTAGRAM_TOKEN_STATUSES.ERROR
+  ) {
+    return storedStatus
+  }
+
+  return INSTAGRAM_TOKEN_STATUSES.ACTIVE
+}
+
 function computeEngagementRate(
   avgLikes: number | null,
   avgComments: number | null,
@@ -489,6 +677,7 @@ function computeEngagementRate(
 ): number | null {
   if (followerCount === null || followerCount <= 0) return null
   if (avgLikes === null && avgComments === null) return null
+
   const likes = avgLikes ?? 0
   const comments = avgComments ?? 0
   return (likes + comments) / followerCount

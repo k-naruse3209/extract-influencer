@@ -10,7 +10,7 @@ export default function TermsPage() {
     <main className="mx-auto max-w-3xl px-4 py-12">
       <h1 className="mb-8 text-3xl font-bold">Terms of Service</h1>
       <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        Last updated: March 31, 2026
+        Last updated: April 9, 2026
       </p>
 
       <section className="space-y-6 text-sm leading-relaxed text-gray-700 dark:text-gray-300">
@@ -33,8 +33,8 @@ export default function TermsPage() {
           <p>
             The Service provides tools for discovering, analyzing, and comparing Instagram
             influencer accounts. Features include profile data retrieval via the Instagram
-            Graph API, scoring and analysis, candidate comparison, and report generation
-            (PDF/CSV).
+            API with Instagram Login, scoring and analysis, candidate comparison, and
+            report generation (PDF/CSV).
           </p>
         </div>
 
@@ -62,26 +62,26 @@ export default function TermsPage() {
 
         <div>
           <h2 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
-            5. Facebook and Instagram Integration
+            5. Instagram Integration
           </h2>
           <p className="mb-2">
-            The Service integrates with Facebook and Instagram via the Meta Platform APIs.
-            By connecting your Facebook account, you agree to:
+            The Service integrates with Instagram via the Instagram API with Instagram
+            Login. By connecting your Instagram account, you agree to:
           </p>
           <ul className="ml-4 list-disc space-y-1">
             <li>
-              Grant the Service permission to access your Facebook Pages and linked
-              Instagram Business accounts as described in our Privacy Policy.
+              Grant the Service permission to access your connected Instagram Business
+              or Creator account as described in our Privacy Policy.
             </li>
             <li>
               Comply with{' '}
               <a
-                href="https://www.facebook.com/terms"
+                href="https://developers.facebook.com/terms"
                 className="text-blue-600 underline dark:text-blue-400"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Facebook&apos;s Terms of Service
+                Meta&apos;s Platform Terms
               </a>{' '}
               and{' '}
               <a

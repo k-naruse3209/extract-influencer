@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus } from '@nestjs/common'
 
 /**
- * Instagram Graph API のレート制限超過（エラーコード #32）を表す例外。
+ * Instagram API のレート制限超過（エラーコード #32）を表す例外。
  *
  * レート制限: 200 calls / hour / user token
  * 発生時はキューワーカーが job.moveToDelayed で 60 秒後にリトライする。

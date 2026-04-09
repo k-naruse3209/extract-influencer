@@ -91,7 +91,7 @@ export function buildBrandFitPrompt(
     ? `\n【ブランド情報】\n<user_input>\n${brandContext}\n</user_input>`
     : '\n【ブランド情報】\n指定なし（汎用的なブランド適合性を評価してください）'
 
-  return `【事実データ】（Instagram Graph API より取得）
+  return `【事実データ】（Instagram API with Instagram Login より取得）
 プラットフォーム: ${profile.platform}
 ユーザー名: ${profile.username}
 ${followerInfo}

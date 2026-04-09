@@ -1,23 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ConfigService } from '@nestjs/config'
 import { InstagramService } from './instagram.service'
-import { InstagramApiClient } from './instagram-api.client'
+import { InstagramOfficialProvider } from './providers/instagram-official.provider'
+import { InstagramRateLimitService } from './instagram-rate-limit.service'
 import type { PrismaService } from '../../common/prisma/prisma.service'
 
 const mockPrisma = {
   instagramToken: {
     upsert: vi.fn().mockResolvedValue({}),
+    findUnique: vi.fn(),
+  },
+  influencerProfile: {
+    findUnique: vi.fn(),
   },
   profileSnapshot: {
     create: vi.fn().mockResolvedValue({ id: 'snap_1' }),
+    findFirst: vi.fn(),
+    update: vi.fn().mockResolvedValue({}),
   },
 } as unknown as PrismaService
 
-const mockApiClient = {
-  exchangeShortLivedToken: vi.fn(),
-  exchangeLongLivedToken: vi.fn(),
-  getProfile: vi.fn(),
-} as unknown as InstagramApiClient
+const mockProvider = {
+  exchangeCode: vi.fn(),
+  getConnectedAccount: vi.fn(),
+} as unknown as InstagramOfficialProvider
+
+const mockRateLimitService = {
+  waitForRequestWindow: vi.fn().mockResolvedValue(undefined),
+  runExclusive: vi.fn().mockImplementation(async (_provider: string, _userId: string, fn: () => unknown) => await fn()),
+} as unknown as InstagramRateLimitService
 
 const mockQueue = {
   add: vi.fn().mockResolvedValue({ id: 'job_1' }),
@@ -26,6 +37,9 @@ const mockQueue = {
 const mockConfigService = {
   getOrThrow: (key: string) => {
     if (key === 'TOKEN_ENCRYPTION_KEY') return 'a'.repeat(64)
+    if (key === 'INSTAGRAM_OAUTH_SCOPES') {
+      return 'instagram_business_basic,instagram_business_manage_insights'
+    }
     throw new Error(`Missing: ${key}`)
   },
 } as unknown as ConfigService
@@ -37,96 +51,138 @@ describe('InstagramService', () => {
     vi.clearAllMocks()
     service = new InstagramService(
       mockPrisma,
-      mockApiClient,
+      mockProvider,
       mockConfigService,
+      mockRateLimitService,
       mockQueue as never,
     )
   })
 
   describe('handleOAuthCallback', () => {
-    it('短命→長命トークン交換→DB保存の一連のフローが正しく動作する', async () => {
-      vi.mocked(mockApiClient.exchangeShortLivedToken).mockResolvedValue({
-        accessToken: 'short_token',
-        tokenType: 'bearer',
-      })
-      vi.mocked(mockApiClient.exchangeLongLivedToken).mockResolvedValue({
+    it('コード交換と接続済みアカウント取得の結果を拡張メタデータ付きで保存する', async () => {
+      vi.mocked(mockProvider.exchangeCode).mockResolvedValue({
         accessToken: 'long_token',
         tokenType: 'bearer',
-        expiresIn: 5184000, // 60日
+        expiresIn: 5184000,
+        grantedScopes: [
+          'instagram_business_basic',
+          'instagram_business_manage_insights',
+        ],
       })
-      vi.mocked(mockApiClient.getProfile).mockResolvedValue({
+      vi.mocked(mockProvider.getConnectedAccount).mockResolvedValue({
         id: 'ig_user_123',
         username: 'testuser',
-        name: null,
-        biography: null,
-        followersCount: null,
-        followsCount: null,
-        mediaCount: null,
-        profilePictureUrl: null,
-        website: null,
-        accountType: 'BUSINESS',
+        name: 'Test User',
       })
 
       await service.handleOAuthCallback('user_1', 'auth_code')
 
-      expect(mockApiClient.exchangeShortLivedToken).toHaveBeenCalledWith('auth_code')
-      expect(mockApiClient.exchangeLongLivedToken).toHaveBeenCalledWith('short_token')
-      expect(mockPrisma.instagramToken.upsert).toHaveBeenCalledOnce()
+      expect(mockProvider.exchangeCode).toHaveBeenCalledWith('auth_code')
+      expect(mockProvider.getConnectedAccount).toHaveBeenCalledWith('long_token')
 
-      // 平文トークンが保存されていないことを確認（暗号化されているはず）
       const upsertCall = vi.mocked(mockPrisma.instagramToken.upsert).mock.calls[0]?.[0]
       expect(upsertCall?.create?.encryptedToken).not.toBe('long_token')
-      expect(upsertCall?.create?.encryptedToken).toContain(':') // iv:authTag:ciphertext 形式
+      expect(upsertCall?.create?.encryptedToken).toContain(':')
+      expect(upsertCall?.create).toMatchObject({
+        providerVariant: 'INSTAGRAM_LOGIN',
+        grantedScopes: 'instagram_business_basic,instagram_business_manage_insights',
+        tokenStatus: 'ACTIVE',
+        instagramUserId: 'ig_user_123',
+        instagramUsername: 'testuser',
+      })
+      expect(upsertCall?.create?.lastValidatedAt).toBeInstanceOf(Date)
+    })
+  })
+
+  describe('getConnectionStatus', () => {
+    it('接続情報に provider/scopes/expiresAt/tokenStatus を含める', async () => {
+      vi.mocked(mockPrisma.instagramToken.findUnique).mockResolvedValue({
+        instagramUserId: 'ig_123',
+        instagramUsername: 'testuser',
+        refreshedAt: new Date('2026-04-09T08:00:00Z'),
+        createdAt: new Date('2026-04-09T07:00:00Z'),
+        providerVariant: 'INSTAGRAM_LOGIN',
+        grantedScopes:
+          'instagram_business_basic,instagram_business_manage_insights',
+        expiresAt: new Date('2026-06-08T08:00:00Z'),
+        tokenStatus: 'ACTIVE',
+      })
+
+      await expect(service.getConnectionStatus('user_1')).resolves.toMatchObject({
+        connected: true,
+        username: 'testuser',
+        provider: 'INSTAGRAM_LOGIN',
+        scopes: [
+          'instagram_business_basic',
+          'instagram_business_manage_insights',
+        ],
+        expiresAt: '2026-06-08T08:00:00.000Z',
+        tokenStatus: 'ACTIVE',
+      })
     })
   })
 
   describe('enqueueProfileFetch', () => {
-    it('PROFILE ジョブをキューに追加できる', async () => {
+    it('PROFILE ジョブを拡張 payload でキューに追加する', async () => {
+      vi.mocked(mockPrisma.influencerProfile.findUnique).mockResolvedValue({
+        id: 'profile_1',
+        username: 'target_user',
+      })
+
       await service.enqueueProfileFetch('profile_1', 'user_1')
+
       expect(mockQueue.add).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'PROFILE', profileId: 'profile_1' }),
+        expect.objectContaining({
+          type: 'PROFILE',
+          profileId: 'profile_1',
+          requestedByUserId: 'user_1',
+          targetUsername: 'target_user',
+          providerVariant: 'INSTAGRAM_LOGIN',
+        }),
         expect.objectContaining({ priority: 1, attempts: 3 }),
       )
     })
   })
 
   describe('saveSnapshot', () => {
-    it('PERSONAL アカウントの followerCount は UNAVAILABLE として保存される', async () => {
-      await service.saveSnapshot('profile_1', {
-        id: 'ig_123',
-        username: 'personal_user',
-        name: null,
-        biography: null,
-        followersCount: 5000, // APIが返しても無視する
-        followsCount: 200,
-        mediaCount: 30,
-        profilePictureUrl: null,
-        website: null,
-        accountType: 'PERSONAL',
-      })
+    it('PERSONAL アカウントの followerCount は UNAVAILABLE として provider metadata 付きで保存される', async () => {
+      await service.saveSnapshot(
+        'profile_1',
+        {
+          id: 'ig_123',
+          username: 'personal_user',
+          name: null,
+          biography: null,
+          followersCount: 5000,
+          followsCount: 200,
+          mediaCount: 30,
+          profilePictureUrl: null,
+          website: null,
+          accountType: 'PERSONAL',
+        },
+        {
+          providerVariant: 'INSTAGRAM_LOGIN',
+          subjectType: 'TARGET_PROFILE',
+          providerPayload: { id: 'ig_123', username: 'personal_user' },
+        },
+      )
 
       const createCall = vi.mocked(mockPrisma.profileSnapshot.create).mock.calls[0]?.[0]
-      expect(createCall?.data?.followerCount).toBeNull()
-      expect(createCall?.data?.followerCountStatus).toBe('UNAVAILABLE')
-    })
-
-    it('BUSINESS アカウントの followerCount は FACT として保存される', async () => {
-      await service.saveSnapshot('profile_1', {
-        id: 'ig_456',
-        username: 'business_user',
-        name: 'Biz User',
-        biography: 'A business',
-        followersCount: 20000,
-        followsCount: 300,
-        mediaCount: 80,
-        profilePictureUrl: null,
-        website: null,
-        accountType: 'BUSINESS',
+      expect(createCall?.data).toMatchObject({
+        followerCount: null,
+        followerCountStatus: 'UNAVAILABLE',
+        providerVariant: 'INSTAGRAM_LOGIN',
+        subjectType: 'TARGET_PROFILE',
       })
-
-      const createCall = vi.mocked(mockPrisma.profileSnapshot.create).mock.calls[0]?.[0]
-      expect(createCall?.data?.followerCount).toBe(20000)
-      expect(createCall?.data?.followerCountStatus).toBe('FACT')
+      expect(createCall?.data?.rawResponse).toMatchObject({
+        providerVariant: 'INSTAGRAM_LOGIN',
+        subjectType: 'TARGET_PROFILE',
+        providerPayload: { id: 'ig_123', username: 'personal_user' },
+        normalizedPayload: expect.objectContaining({
+          id: 'ig_123',
+          username: 'personal_user',
+        }),
+      })
     })
   })
 })
