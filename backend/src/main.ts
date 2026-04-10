@@ -27,8 +27,8 @@ async function bootstrap(): Promise<void> {
     },
   )
 
-  // Global prefix
-  app.setGlobalPrefix('api/v1')
+  // Global prefix — /webhook は Meta Webhook 疎通確認のため除外
+  app.setGlobalPrefix('api/v1', { exclude: ['webhook'] })
 
   // Global exception filter for unified error response format
   app.useGlobalFilters(new HttpExceptionFilter())

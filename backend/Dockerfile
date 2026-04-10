@@ -39,6 +39,7 @@ COPY shared/ ./shared/
 RUN npm ci --workspace=backend --omit=dev
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# cache-bust: 2026-04-10 (webhook module added)
 COPY --from=builder /app/backend/dist ./backend/dist
 COPY backend/prisma ./backend/prisma
 COPY backend/startup.sh ./startup.sh
