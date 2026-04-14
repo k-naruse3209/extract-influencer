@@ -56,8 +56,21 @@ async function bootstrap(): Promise<void> {
     credentials: true,
   })
 
-  // Static pages — served directly (no /api/v1 prefix) for Meta App Review
+  // Raw body capture for Meta Webhook X-Hub-Signature-256 verification.
+  // Fastify does not preserve rawBody by default; override JSON parser to store original string.
   const fastifyInstance = app.getHttpAdapter().getInstance()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fastifyInstance.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: (err: Error | null, payload?: unknown) => void) => {
+    req.rawBody = body
+    try {
+      done(null, JSON.parse(body))
+    } catch (err) {
+      done(err as Error)
+    }
+  })
+
+  // Static pages — served directly (no /api/v1 prefix) for Meta App Review
 
   fastifyInstance.get('/terms', async (_request: unknown, reply: { type: (t: string) => { send: (html: string) => void } }) => {
     reply.type('text/html').send(`<!DOCTYPE html>
