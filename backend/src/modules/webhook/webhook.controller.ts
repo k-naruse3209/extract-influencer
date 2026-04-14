@@ -103,6 +103,7 @@ export class WebhookController {
       const isValid =
         sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf)
 
+      this.logger.debug(`Webhook POST: rawBodyLen=${rawBody.length} sigPresent=${!!signature} secretPresent=${!!clientSecret}`)
       if (!isValid) {
         this.logger.warn('Webhook POST: invalid X-Hub-Signature-256 — ignoring')
         return { ok: true }
