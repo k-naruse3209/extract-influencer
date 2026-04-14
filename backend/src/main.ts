@@ -57,18 +57,24 @@ async function bootstrap(): Promise<void> {
   })
 
   // Raw body capture for Meta Webhook X-Hub-Signature-256 verification.
-  // Fastify does not preserve rawBody by default; we override the JSON parser
-  // to store the original string on req.rawBody before JSON.parse.
+  // Use preParsing hook (runs before content-type parser) to buffer the raw bytes
+  // on req.rawBody without conflicting with NestJS's built-in JSON parser registration.
   const fastifyInstance = app.getHttpAdapter().getInstance()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fastifyInstance.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: (err: Error | null, payload?: unknown) => void) => {
-    req.rawBody = body
-    try {
-      done(null, JSON.parse(body))
-    } catch (err) {
-      done(err as Error)
+  fastifyInstance.addHook('preParsing', async (request: any, _reply: unknown, payload: any) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of payload) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string))
     }
+    const raw = Buffer.concat(chunks)
+    request.rawBody = raw.toString('utf-8')
+    // Return a new Readable so Fastify can still parse the body normally
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Readable } = require('node:stream') as typeof import('node:stream')
+    const newPayload = Readable.from(raw)
+    ;(newPayload as unknown as { receivedEncodedLength: number }).receivedEncodedLength = raw.length
+    return newPayload
   })
 
   // Static pages — served directly (no /api/v1 prefix) for Meta App Review
