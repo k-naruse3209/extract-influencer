@@ -15,10 +15,15 @@ RUN npm ci --workspace=@influencer-platform/frontend
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# BACKEND_URL must be set at build time so Next.js bakes the correct rewrite destination
+# into routes-manifest.json (rewrites() is evaluated at build time in standalone mode)
+ARG BACKEND_URL=https://influencer-platformbackend-production.up.railway.app
+ENV BACKEND_URL=$BACKEND_URL
+
 # Reuse installed modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy full monorepo (needed for shared types and next.config.ts)
+# Copy full monorepo (needed for shared types and next.config.mjs)
 COPY . .
 
 # Build Next.js standalone output
