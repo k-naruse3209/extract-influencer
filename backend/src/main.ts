@@ -60,6 +60,8 @@ async function bootstrap(): Promise<void> {
   // Fastify does not preserve rawBody by default; override JSON parser to store original string.
   const fastifyInstance = app.getHttpAdapter().getInstance()
 
+  // Remove default JSON parser first to avoid FST_ERR_CTP_ALREADY_PRESENT when overriding
+  fastifyInstance.removeContentTypeParser('application/json')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fastifyInstance.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: (err: Error | null, payload?: unknown) => void) => {
     req.rawBody = body
