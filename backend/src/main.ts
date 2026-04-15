@@ -61,6 +61,8 @@ async function bootstrap(): Promise<void> {
   // on req.rawBody without conflicting with NestJS's built-in JSON parser registration.
   const fastifyInstance = app.getHttpAdapter().getInstance()
 
+  // Remove default JSON parser first to avoid FST_ERR_CTP_ALREADY_PRESENT when overriding
+  fastifyInstance.removeContentTypeParser('application/json')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fastifyInstance.addHook('preParsing', async (request: any, _reply: unknown, payload: any) => {
     const chunks: Buffer[] = []
