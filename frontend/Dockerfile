@@ -1,40 +1,55 @@
-# --- Stage 1: Dependencies ---
+# Stage 1: Install dependencies
 FROM node:20-alpine AS deps
-
 WORKDIR /app
+
+# Copy root workspace manifests
 COPY package.json package-lock.json ./
-COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
-COPY shared/package.json ./shared/ 2>/dev/null || true
-RUN npm ci --workspace=frontend
+COPY backend/package.json ./backend/
+COPY shared/package.json ./shared/
 
-# --- Stage 2: Build ---
+# Install only frontend workspace (and its transitive workspace deps)
+RUN npm ci --workspace=@influencer-platform/frontend
+
+# Stage 2: Build
 FROM node:20-alpine AS builder
-
 WORKDIR /app
+
+# Reuse installed modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/frontend/node_modules ./frontend/node_modules 2>/dev/null || true
-COPY package.json ./
-COPY frontend ./frontend
-RUN npm run build --workspace=frontend
 
-# --- Stage 3: Production ---
+# Copy full monorepo (needed for shared types and next.config.ts)
+COPY . .
+
+# Build Next.js standalone output
+RUN npm run build --workspace=@influencer-platform/frontend
+
+# Ensure public directory exists even if empty
+RUN mkdir -p /app/frontend/public
+
+# Stage 3: Production runner (minimal image)
 FROM node:20-alpine AS runner
-
-ENV NODE_ENV=production
 WORKDIR /app
 
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# Non-root user for security
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/frontend/public ./public
+# Copy standalone output → /app (server.js lands at /app/server.js)
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
+
+# Static assets must be at .next/static relative to server.js
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+
+# Public assets must be at public/ relative to server.js
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
 
 USER nextjs
 
 EXPOSE 3000
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
