@@ -1,0 +1,21 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "npm ci && npm run build --workspace=@influencer-platform/frontend",
+    "nixpacksConfigPath": "frontend/nixpacks.toml",
+    "watchPatterns": [
+      "frontend/**",
+      "shared/**",
+      "package.json",
+      "package-lock.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "node frontend/.next/standalone/server.js",
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}
