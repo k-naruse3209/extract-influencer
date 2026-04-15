@@ -1,0 +1,15 @@
+[phases.setup]
+nixpkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build --workspace=@influencer-platform/frontend"]
+
+[start]
+cmd = "node frontend/.next/standalone/server.js"
+
+[variables]
+PORT = "3000"
+HOSTNAME = "0.0.0.0"
