@@ -10,7 +10,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "node server.js",
+    "startCommand": "node frontend/server.js",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

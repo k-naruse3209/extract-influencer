@@ -39,17 +39,18 @@ ENV NODE_ENV=production \
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy standalone output → /app (server.js lands at /app/server.js)
+# Copy standalone output; in monorepo without outputFileTracingRoot,
+# Next.js mirrors the workspace path → server.js lands at /app/frontend/server.js
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 
-# Static assets must be at .next/static relative to server.js
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+# Static assets must be at .next/static relative to server.js (/app/frontend/.next/static)
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./frontend/.next/static
 
-# Public assets must be at public/ relative to server.js
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
+# Public assets must be at public/ relative to server.js (/app/frontend/public)
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./frontend/public
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "frontend/server.js"]
