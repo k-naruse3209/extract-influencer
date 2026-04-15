@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"⚠️ MINIMAX REQUIRED: Before applying any code change with Edit/Write, you MUST have called Minimax API via curl (https://api.minimax.io/v1/chat/completions, model: minimax-m2.7). If you have NOT called Minimax yet for this code generation, STOP and call it first. This is mandatory per .claude/rules/implementation-workflow.md — no exceptions.\"}}'",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"⚠️ MINIMAX REQUIRED: Before applying any code change with Edit/Write, you MUST: (1) have called Minimax API via curl (https://api.minimax.io/v1/chat/completions, model: minimax-m2.7), AND (2) verified that choices[0].message.content contains actual code/text beyond just <think> tags. If response was empty or <think>-only: RETRY up to 2 times. If still invalid after 2 retries: STOP and report to user — do NOT proceed with Edit/Write. This is mandatory per .claude/rules/implementation-workflow.md — no exceptions.\"}}'",
             "statusMessage": "Minimax pre-check"
           }
         ]
